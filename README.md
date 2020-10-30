@@ -42,14 +42,14 @@ Run the following commands in Stash, to install dependencies:
 
 In the Pythonista root, create directory `covid_certificate`.
 
-Download the following files from repo https://github.com/TPO-POMGOM/Pythonista-utilities,
+Download the following files (*) from repo https://github.com/TPO-POMGOM/Pythonista-utilities,
 into directory `covid_certificate`:
 
 - `busy_view.py`
 
 - `mail_compose.py`
 
-Download the following files from repo https://github.com/TPO-POMGOM/covid_certificate,
+Download the following files (*) from repo https://github.com/TPO-POMGOM/covid_certificate,
 into directory `covid_certificate`:
 
 - `attestation-deplacement-fr.pdf`
@@ -61,6 +61,8 @@ into directory `covid_certificate`:
 Rename `persons_example.json` to `persons.json` and customise its contents.
 
 Run `covid_certificate.py`
+
+(*) for instance, using jsbain's GitHubGet https://github.com/jsbain/GitHubGet/blob/master/GitHubGet.py
 
 
 Disclaimers
