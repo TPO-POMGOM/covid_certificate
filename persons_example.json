@@ -3,11 +3,11 @@
         "Bob", "Smith",
         "birthdate", "birthplace",
         "address", "postal code", "city",
-        "bob@smith.com",
+        "bob@smith.com"
     ], [
         "Alice", "Smith",
         "birthdate", "birthplace",
         "address", "postal code", "city",
-        "alice@smith.com",
+        "alice@smith.com"
     ]
 ]

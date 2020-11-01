@@ -24,8 +24,12 @@ alternative to the official service:
 - When run, the applet displays a list of persons for whom a certificate can be
   generated.
 
+  ![Screenshot](Screenshot 1 - UI.png)
+
 - When a person is selected, an email is prepared, with the PDF file for the
   certificate attached, and you only have to press the send button.
+
+  ![Screenshot](Screenshot 2 - Mail.png)
 
 
 Getting Started
