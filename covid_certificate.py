@@ -55,29 +55,215 @@ not to work around the rules of confinement - Use in a responsible way.
 
 - 6-Avr-2020 - Initial release, with only QR code generation.
 
-- 21-Avr-2020 - Second release, with PDF file generation and full UI. """
+- 21-Avr-2020 - Second release, with PDF file generation and full UI.
+
+- 1-Nov-2020 - Third release, with PDF file updated to the new official format. """
 
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
 from time import sleep
 from threading import Thread
-from typing import List
+from typing import ClassVar, List
+import sys
 
 from PIL import Image, ImageDraw, ImageFont
 import qrcode
-import ui
 
-from pdfrw import PageMerge, PdfDict, PdfReader, PdfWriter, PdfName
+from pdfrw import PageMerge, PdfReader, PdfWriter
 from pdfrw.pagemerge import RectXObj
-
-from busy_view import BusyView
-from mail_compose import mail_compose
 
 
 PERSONS_FILE = "persons.json"
+TEMPLATE_PDF = 'attestation-deplacement-fr 2020 10 30.pdf'
+CERTIFICATE_PDF = 'Attestation.pdf'
+REASONS = ["travail", "achats", "sante", "famille", "sport_animaux"]
+
+
+if sys.platform == 'ios':
+    import ui
+    from busy_view import BusyView
+    from mail_compose import mail_compose
+
+    CONTROLS_HEIGHT = 30
+    CONTROLS_HORIZONTAL_MARGIN = 16
+    CONTROLS_VERTICAL_MARGIN = 4
+    SEPARATOR_COLOR = '#cccccc'    # iOS light grey
+
+    class PersonsView(ui.View):
+        """ UI for presenting a list of persons and generating certificates.
+
+
+        Arguments
+        ---------
+
+        persons: `List[` :class:`Person` `]`
+            List of persons to be displayed. """
+
+        def __init__(self, persons: List["Person"]):
+            self.persons = persons
+            self.now = datetime.now()
+            self.name = "Attestion de déplacement"
+            self.flex = "WH"
+            self.background_color = 'white'
+            y = CONTROLS_VERTICAL_MARGIN
+
+            self.reason_selector = ui.SegmentedControl(
+                y=y,
+                width=300,
+                segments=REASONS,
+                selected_index=4)
+            y += CONTROLS_HEIGHT + CONTROLS_VERTICAL_MARGIN
+
+            self.generated_label1 = ui.Label(
+                text=f"Créé à : {self.now.strftime('%Hh%M')} - ")
+            self.generated_label1.size_to_fit()
+            self.generated_label1.y = (
+                y + (CONTROLS_HEIGHT - self.generated_label1.height) / 2)
+            self.generated_textfield = ui.TextField(
+                y=y,
+                width=50,
+                height=CONTROLS_HEIGHT,
+                keyboard_type=ui.KEYBOARD_NUMBER_PAD,
+                placeholder="0",
+                delegate=self)
+            self.generated_label2 = ui.Label(
+                text=" min")
+            self.generated_label2.size_to_fit()
+            self.generated_label2.y = (
+                y + (CONTROLS_HEIGHT - self.generated_label1.height) / 2)
+            y += CONTROLS_HEIGHT + CONTROLS_VERTICAL_MARGIN
+
+            self.start_label1 = ui.Label()
+            self.start_textfield = ui.TextField(
+                y=y,
+                width=50,
+                height=CONTROLS_HEIGHT,
+                keyboard_type=ui.KEYBOARD_NUMBER_PAD,
+                placeholder="0")
+            self.start_label2 = ui.Label(
+                text=" min")
+            self.start_label2.size_to_fit()
+            self.start_label2.y = y + (CONTROLS_HEIGHT - self.start_label2.height) / 2
+            y += CONTROLS_HEIGHT + CONTROLS_VERTICAL_MARGIN
+
+            self.separator_line = ui.View(
+                y=y,
+                height=1,
+                border_width=1,
+                border_color=SEPARATOR_COLOR)
+            y += 1
+
+            self.tableview = ui.TableView(
+                y=y,
+                data_source=self,
+                delegate=self)
+
+            self.busy = BusyView()
+
+            for view in [self.reason_selector, self.start_label1,
+                         self.start_textfield, self.start_label2,
+                         self.generated_label1, self.generated_textfield,
+                         self.generated_label2, self.separator_line,
+                         self.tableview, self.busy]:
+                self.add_subview(view)
+
+        def layout(self) -> None:
+            """ [ui.View] Update position and size of controls. """
+            inset = self.objc_instance.safeAreaInsets()
+            width = self.width - inset.left - inset.right
+            height = self.height - inset.bottom
+            self.reason_selector.x = (inset.left
+                                      + (width - self.reason_selector.width) / 2)
+            self.generated_label1.x = self.reason_selector.x
+            self.generated_textfield.x = (self.generated_label1.x
+                                          + self.generated_label1.width)
+            self.generated_label2.x = (self.generated_textfield.x
+                                       + self.generated_textfield.width)
+            self.start_label1.text = (
+                f"Début de sortie : {self.generated_time().strftime('%Hh%M')} + ")
+            self.start_label1.size_to_fit()
+            self.start_label1.x = self.reason_selector.x
+            self.start_label1.y = (self.start_textfield.y
+                                   + (CONTROLS_HEIGHT - self.start_label1.height) / 2)
+            self.start_textfield.x = self.start_label1.x + self.start_label1.width
+            self.start_label2.x = self.start_textfield.x + self.start_textfield.width
+            self.separator_line.x = inset.left
+            self.separator_line.width = width
+            self.tableview.x = inset.left
+            self.tableview.width = width
+            self.tableview.height = height - self.tableview.y
+
+        def textfield_did_change(self, textfield: ui.TextField) -> None:
+            """ [ui.TextField] Update `start` field when `generated` field changes. """
+            self.layout()
+
+        def tableview_number_of_rows(self,
+                                     tableview: ui.TableView,
+                                     section: int) -> int:
+            """ [ui.TableView] Return number rows = # persons. """
+            return len(self.persons)
+
+        def tableview_cell_for_row(self,
+                                   tableview: ui.TableView,
+                                   section: int,
+                                   row: int) -> ui.TableViewCell:
+            """ [ui.TableView] Display the first name of a given person. """
+            cell = ui.TableViewCell()
+            cell.selectable = False
+            cell.text_label.text = self.persons[row].first_name
+            return cell
+
+        def tableview_did_select(self,
+                                 tableview: ui.TableView,
+                                 section: int,
+                                 row: int) -> None:
+            """ [ui.TableView] User selected a person. """
+
+            def continuation():
+                nonlocal self
+                person = self.persons[row]
+                start = self.start_time()
+                pdf_file = generate_certificate_pdf(
+                    person=person,
+                    reason=self.reason_selector.selected_index,
+                    start=start,
+                    generated=self.generated_time())
+                # Displaying a BusyView is necessary, because generate_certificate_pdf()
+                # takes more than a fraction of a second to run. However, it does
+                # not take long enough for the user to "see" BusyView, which seems
+                # to flash on and off very quickly. The following extra delay is
+                # only there for the user to have time to "see" BusyView before it
+                # goes away.
+                sleep(.3)
+                self.busy.hide()
+                weekdays = ['lundi', 'mardi', 'mercredi',
+                            'jeudi', 'vendredi', 'samedi', 'dimanche']
+                subject = (f"Attestion de déplacement - {weekdays[start.weekday()]} "
+                           f"{start.strftime('%Hh%M')}")
+                mail_compose(subject=subject,
+                             recipients=[person.email],
+                             filename=pdf_file,
+                             mime_type='application/pdf')
+
+            self.busy.show()
+            Thread(target=continuation).start()
+
+        def close_and_exit(self, sender: ui.Button) -> None:
+            """ [ui.Button] Close the view and exit app. """
+            self.close()
+
+        def generated_time(self) -> datetime:
+            """ Return the time the certificate was generated, as a datetime. """
+            return (self.now
+                    - timedelta(minutes=int(self.generated_textfield.text or '0')))
+
+        def start_time(self) -> datetime:
+            """ Return the time the certificate starts, as a datetime. """
+            return (self.generated_time()
+                    + timedelta(minutes=int(self.start_textfield.text or '0')))
 
 
 @dataclass
@@ -93,13 +279,55 @@ class Person:
     email: str
 
 
-REASONS = ["travail", "courses", "sante", "famille", "sport"]
+@dataclass
+class Field:
+    """ Represent a field in the PDF certificate file. """
+    x: float
+    y: float
+    scale: float
+    filename: str = dataclass_field(init=False)
+    count: ClassVar[int] = 0
+
+    def __post_init__(self):
+        self.filename = f'temp{Field.count}.pdf'
+        Field.count += 1
 
 
-CONTROLS_HEIGHT = 30
-CONTROLS_HORIZONTAL_MARGIN = 16
-CONTROLS_VERTICAL_MARGIN = 4
-SEPARATOR_COLOR = '#cccccc'    # iOS light grey
+@dataclass
+class TextField(Field):
+    """ Represent a text field in the PDF certificate file. """
+    text: str
+    font: ImageFont.FreeTypeFont
+
+    def __post_init__(self):
+        super().__post_init__()
+        w, h = self.font.getsize(self.text)
+        img = Image.new(mode='1', size=(w, h), color='white')
+        ImageDraw.Draw(img).text((0, 0), self.text, font=self.font, fill='black')
+        img.save(self.filename)
+
+
+@dataclass
+class QRCodeField(Field):
+    """ Represent a QRCode field in the PDF certificate file. """
+    person: Person
+    reason: int
+    start: datetime
+    generated: datetime
+
+    def __post_init__(self):
+        super().__post_init__()
+        QRCODE_SIZE_PX = 152  # Good compromise between image size and quality
+        person = self.person
+        img = qrcode.make(
+            f"Cree le: {self.generated.strftime('%d/%m/%Y a %Hh%M')};\n "
+            f"Nom: {person.last_name};\n Prenom: {person.first_name};\n "
+            f"Naissance: {person.birthdate} a {person.birthplace};\n "
+            f"Adresse: {person.address} {person.postal_code} {person.city};\n "
+            f"Sortie: {self.start.strftime('%d/%m/%Y a %H:%M')};\n "
+            f"Motifs: {REASONS[self.reason]}"
+        ).resize(size=(QRCODE_SIZE_PX, QRCODE_SIZE_PX))
+        img.save(self.filename)
 
 
 def generate_certificate_pdf(person: Person,
@@ -135,320 +363,94 @@ def generate_certificate_pdf(person: Person,
     def cm_to_point(cm: float) -> int:
         return int(cm / 2.54 * 72)
 
-    # The template PDF is included in the package. It may be downloaded from
-    # https://www.interieur.gouv.fr/attestation_de_deplacement_derogatoire
-    TEMPLATE_PDF = 'attestation-deplacement-fr.pdf'
-    FILLED_FORM_PDF = 'Attestation_temp_filled_form.pdf'
-    QRCODE_PDF = 'Attestation_temp_qrcode.pdf'
-    TIMESTAMP_PDF = 'Attestation_temp_timestamp.pdf'
-    LEGEND_PDF = 'Attestation_temp_legend.pdf'
-    CERTIFICATE_PDF = 'Attestation.pdf'
-
-    QRCODE_SIZE_PX = 152  # Good compromise between image size and quality
-    QRCODE1_X = cm_to_point(14.75)
-    QRCODE1_Y = cm_to_point(29.7 - 24.5)
-    QRCODE1_WIDTH = cm_to_point(4.0)
-    TIMESTAMP_X = cm_to_point(16.15)
-    TIMESTAMP_Y = cm_to_point(29.7 - 24.7)
-    TIMESTAMP_WIDTH = cm_to_point(2.2)
-    TIMESTAMP_FONT = 'Helvetica'
-    TIMESTAMP_FONT_SIZE = 20
-    LEGEND_X = cm_to_point(2.52)
-    LEGEND_Y = cm_to_point(29.7 - 24.6)
-    LEGEND_WIDTH = cm_to_point(11.5)
-    LEGEND_FONT = 'Helvetica'
-    LEGEND_FONT_SIZE = 24
-    QRCODE2_X = cm_to_point(1.3)
-    QRCODE2_Y = cm_to_point(29.7 - 1.2 - 11.6)
-    QRCODE2_WIDTH = cm_to_point(11.6)
-
-    # Generate PDF file for filled-in form.
-    form = {
-        'Nom et prénom': f"{person.first_name} {person.last_name}",
-        'Date de naissance': person.birthdate,
-        'Lieu de naissance': person.birthplace,
-        'Adresse actuelle': f"{person.address} {person.postal_code} {person.city}",
-        'Déplacements entre domicile et travail': reason == 0,
-        'Déplacements achats nécéssaires': reason == 1,
-        'Consultations et soins': reason == 2,
-        'Déplacements pour motif familial': reason == 3,
-        'Déplacements brefs \\(activité physique et animaux\\)': reason == 4,
-        'Convcation judiciaire ou administrative': reason == 5,  # Typo required!
-        "Mission d'intérêt général": reason == 6,
-        'Ville': person.city,
-        'Date': start.strftime('%d/%m/%Y'),
-        'Heure': start.strftime(' %H'),
-        'Minute': start.strftime('%M'),
-    }
-    template_pdf = PdfReader(TEMPLATE_PDF)
-    annotations = template_pdf.pages[0]['/Annots']
-    for annotation in annotations:
-        if annotation['/Subtype'] == '/Widget':
-            if annotation['/T']:
-                key = annotation['/T'][1:-1]
-                if key in form:
-                    value = form[key]
-                    if isinstance(value, bool):
-                        if value:
-                            annotation.update(PdfDict(V=PdfName('Oui'),
-                                                      AS=PdfName('Oui')))
-                    else:
-                        annotation.update(PdfDict(V=value))
-    PdfWriter().write(FILLED_FORM_PDF, template_pdf)
-
-    # Generate PDF file for qrcode.
-    qrcode_img = qrcode.make(
-        f"Cree le: {generated.strftime('%d/%m/%Y a %Hh%M')}; "
-        f"Nom: {person.last_name}; Prenom: {person.first_name}; "
-        f"Naissance: {person.birthdate} a {person.birthplace}; "
-        f"Adresse: {person.address} {person.postal_code} {person.city}; "
-        f"Sortie: {start.strftime('%d/%m/%Y a %H:%M')}; "
-        f"Motifs: {REASONS[reason]}").resize(size=(QRCODE_SIZE_PX, QRCODE_SIZE_PX))
-    qrcode_img.save(QRCODE_PDF)
-
-    # Generate PDF file for timestamp.
-    timestamp_line1 = "Date de création:"
-    timestamp_line2 = generated.strftime('%d/%m/%Y à %Hh%M')
-    font = ImageFont.truetype(TIMESTAMP_FONT, TIMESTAMP_FONT_SIZE)
-    w1, h1 = font.getsize(timestamp_line1)
-    w2, h2 = font.getsize(timestamp_line2)
-    timestamp_img = Image.new(
-        mode='1',
-        size=(max(w1, w2), h1 + 4 + h2),
-        color='white')
-    draw = ImageDraw.Draw(timestamp_img)
-    # Pythonista PIL supports neither multiline text nor right aligned text,
-    # we must do it by hand.
-    draw.text(
-        (max(w1, w2) - w1, 0),
-        timestamp_line1,
-        font=font,
-        fill='black')
-    draw.text(
-        (max(w1, w2) - w2, h1 + 4),
-        timestamp_line2,
-        font=font,
-        fill='black')
-    timestamp_img.save(TIMESTAMP_PDF)
-
-    # Generate PDF file for legend.
-    legend = "(Date et heure de début de sortie)"
+    if sys.platform == 'ios':
+        LEGEND_FONT = 'Helvetica'
+        LEGEND_FONT_SIZE = 24
+    else:
+        LEGEND_FONT = 'arial.ttf'
+        LEGEND_FONT_SIZE = 24
     font = ImageFont.truetype(LEGEND_FONT, LEGEND_FONT_SIZE)
-    w, h = font.getsize(legend)
-    legend_img = Image.new(
-        mode='1',
-        size=(w * 2, h * 5),
-        color='white')
-    ImageDraw.Draw(legend_img).text(
-        (0, 0),
-        legend,
-        font=font,
-        fill='black')
-    legend_img.save(LEGEND_PDF)
 
-    # Generate the final PDF file, by adding the qrcode, timestamp and legend
-    # to page 1, creating page 2 with a big version of the qrcode, and
-    # appending page 2 to page 1.
-    def set_position_width(obj: RectXObj, x: int, y: int, width: int) -> None:
-        obj.x = x
-        obj.y = y
-        obj.w = width
-    page1 = PdfReader(FILLED_FORM_PDF).pages[0]
-    qrcod = PdfReader(QRCODE_PDF).pages[0]
-    timestamp = PdfReader(TIMESTAMP_PDF).pages[0]
-    legend = PdfReader(LEGEND_PDF).pages[0]
-    xobj = PageMerge(page1).add(qrcod).add(timestamp).add(legend)
-    set_position_width(xobj[1], QRCODE1_X, QRCODE1_Y, QRCODE1_WIDTH)
-    set_position_width(xobj[2], TIMESTAMP_X, TIMESTAMP_Y, TIMESTAMP_WIDTH)
-    set_position_width(xobj[3], LEGEND_X, LEGEND_Y, LEGEND_WIDTH)
-    page1 = xobj.render()
-    xobj = PageMerge().add(qrcod)
-    set_position_width(xobj[0], QRCODE2_X, QRCODE2_Y, QRCODE2_WIDTH)
-    page2 = xobj.render()
+    fields = [
+        TextField(text=f"{person.first_name} {person.last_name}",
+                  font=font,
+                  x=4.2, y=24.57, scale=.47),
+        TextField(text=person.birthdate,
+                  font=font,
+                  x=4.2, y=23.75, scale=.47),
+        TextField(text=person.birthplace,
+                  font=font,
+                  x=10.5, y=23.75, scale=.47),
+        TextField(text=f"{person.address} {person.postal_code} {person.city} ",
+                  font=font,
+                  x=4.75, y=23.03, scale=.47),
+        TextField(text="X" if reason == 0 else " ",
+                  font=font,
+                  x=2.8, y=20.36, scale=.5),
+        TextField(text="X" if reason == 1 else " ",
+                  font=font,
+                  x=2.8, y=18.77, scale=.5),
+        TextField(text="X" if reason == 2 else " ",
+                  font=font,
+                  x=2.8, y=16.85, scale=.5),
+        TextField(text="X" if reason == 3 else " ",
+                  font=font,
+                  x=2.8, y=15.38, scale=.5),
+        TextField(text="X" if reason == 4 else " ",
+                  font=font,
+                  x=2.8, y=12.62, scale=.5),
+        TextField(text=person.city,
+                  font=font,
+                  x=3.85, y=6.17, scale=.47),
+        TextField(text=start.strftime('%d/%m/%Y'),
+                  font=font,
+                  x=3.3, y=5.37, scale=.47),
+        TextField(text=start.strftime('%H:%M'),
+                  font=font,
+                  x=9.4, y=5.37, scale=.47),
+        QRCodeField(person=person, reason=reason, start=start, generated=generated,
+                    x=15.35, y=3.5, scale=.65)
+    ]
+
+    def set_position(obj: RectXObj, x: float, y: float, scale: float) -> None:
+        obj.x = cm_to_point(x)
+        obj.y = cm_to_point(y)
+        obj.w *= scale
+
+    # Generate page 1
+    page1_xobj = PageMerge(PdfReader(TEMPLATE_PDF).pages[0])
+    for field in fields:
+        pdf = PdfReader(field.filename).pages[0]
+        page1_xobj.add(pdf)
+        set_position(page1_xobj[-1], field.x, field.y, field.scale)
+        if isinstance(field, QRCodeField):
+            qrcode = pdf
+    page1 = page1_xobj.render()
+
+    # Generate page 2
+    qrcode_xobj = PageMerge().add(qrcode)
+    set_position(qrcode_xobj[0], 1.3, 16.9, 2.15)
+    page2 = qrcode_xobj.render()
     page2.MediaBox = page1.MediaBox
+
+    # Generate certificate document
     PdfWriter().addpages([page1, page2]).write(CERTIFICATE_PDF)
 
     # Remove temporary files.
-    for file in (FILLED_FORM_PDF, QRCODE_PDF, TIMESTAMP_PDF, LEGEND_PDF):
-        Path(file).unlink()
+    for field in fields:
+        Path(field.filename).unlink()
 
     return CERTIFICATE_PDF
-
-
-class PersonsView(ui.View):
-    """ UI for presenting a list of persons and generating certificates.
-
-
-    Arguments
-    ---------
-
-    persons: `List[` :class:`Person` `]`
-        List of persons to be displayed. """
-
-    def __init__(self, persons: List[Person]):
-        self.persons = persons
-        self.now = datetime.now()
-        self.name = "Attestion de déplacement"
-        self.flex = "WH"
-        self.background_color = 'white'
-        y = CONTROLS_VERTICAL_MARGIN
-
-        self.reason_selector = ui.SegmentedControl(
-            y=y,
-            width=300,
-            segments=REASONS,
-            selected_index=4)
-        y += CONTROLS_HEIGHT + CONTROLS_VERTICAL_MARGIN
-
-        self.generated_label1 = ui.Label(
-            text=f"Créé à : {self.now.strftime('%Hh%M')} - ")
-        self.generated_label1.size_to_fit()
-        self.generated_label1.y = (
-            y + (CONTROLS_HEIGHT - self.generated_label1.height) / 2)
-        self.generated_textfield = ui.TextField(
-            y=y,
-            width=50,
-            height=CONTROLS_HEIGHT,
-            keyboard_type=ui.KEYBOARD_NUMBER_PAD,
-            placeholder="0",
-            delegate=self)
-        self.generated_label2 = ui.Label(
-            text=" min")
-        self.generated_label2.size_to_fit()
-        self.generated_label2.y = (
-            y + (CONTROLS_HEIGHT - self.generated_label1.height) / 2)
-        y += CONTROLS_HEIGHT + CONTROLS_VERTICAL_MARGIN
-
-        self.start_label1 = ui.Label()
-        self.start_textfield = ui.TextField(
-            y=y,
-            width=50,
-            height=CONTROLS_HEIGHT,
-            keyboard_type=ui.KEYBOARD_NUMBER_PAD,
-            placeholder="0")
-        self.start_label2 = ui.Label(
-            text=" min")
-        self.start_label2.size_to_fit()
-        self.start_label2.y = y + (CONTROLS_HEIGHT - self.start_label2.height) / 2
-        y += CONTROLS_HEIGHT + CONTROLS_VERTICAL_MARGIN
-
-        self.separator_line = ui.View(
-            y=y,
-            height=1,
-            border_width=1,
-            border_color=SEPARATOR_COLOR)
-        y += 1
-
-        self.tableview = ui.TableView(
-            y=y,
-            data_source=self,
-            delegate=self)
-
-        self.busy = BusyView()
-
-        for view in [self.reason_selector, self.start_label1,
-                     self.start_textfield, self.start_label2,
-                     self.generated_label1, self.generated_textfield,
-                     self.generated_label2, self.separator_line,
-                     self.tableview, self.busy]:
-            self.add_subview(view)
-
-    def layout(self) -> None:
-        """ [ui.View] Update position and size of controls. """
-        inset = self.objc_instance.safeAreaInsets()
-        width = self.width - inset.left - inset.right
-        height = self.height - inset.bottom
-        self.reason_selector.x = inset.left + (width - self.reason_selector.width) / 2
-        self.generated_label1.x = self.reason_selector.x
-        self.generated_textfield.x = (self.generated_label1.x
-                                      + self.generated_label1.width)
-        self.generated_label2.x = (self.generated_textfield.x
-                                   + self.generated_textfield.width)
-        self.start_label1.text = (
-            f"Début de sortie : {self.generated_time().strftime('%Hh%M')} + ")
-        self.start_label1.size_to_fit()
-        self.start_label1.x = self.reason_selector.x
-        self.start_label1.y = (self.start_textfield.y
-                               + (CONTROLS_HEIGHT - self.start_label1.height) / 2)
-        self.start_textfield.x = self.start_label1.x + self.start_label1.width
-        self.start_label2.x = self.start_textfield.x + self.start_textfield.width
-        self.separator_line.x = inset.left
-        self.separator_line.width = width
-        self.tableview.x = inset.left
-        self.tableview.width = width
-        self.tableview.height = height - self.tableview.y
-
-    def textfield_did_change(self, textfield: ui.TextField) -> None:
-        """ [ui.TextField] Update `start` field when `generated` field changes. """
-        self.layout()
-
-    def tableview_number_of_rows(self,
-                                 tableview: ui.TableView,
-                                 section: int) -> int:
-        """ [ui.TableView] Return number rows = # persons. """
-        return len(self.persons)
-
-    def tableview_cell_for_row(self,
-                               tableview: ui.TableView,
-                               section: int,
-                               row: int) -> ui.TableViewCell:
-        """ [ui.TableView] Display the first name of a given person. """
-        cell = ui.TableViewCell()
-        cell.selectable = False
-        cell.text_label.text = self.persons[row].first_name
-        return cell
-
-    def tableview_did_select(self,
-                             tableview: ui.TableView,
-                             section: int,
-                             row: int) -> None:
-        """ [ui.TableView] User selected a person. """
-
-        def continuation():
-            nonlocal self
-            person = self.persons[row]
-            start = self.start_time()
-            pdf_file = generate_certificate_pdf(
-                person=person,
-                reason=self.reason_selector.selected_index,
-                start=start,
-                generated=self.generated_time())
-            # Displaying a BusyView is necessary, because generate_certificate_pdf()
-            # takes more than a fraction of a second to run. However, it does
-            # not take long enough for the user to "see" BusyView, which seems
-            # to flash on and off very quickly. The following extra delay is
-            # only there for the user to have time to "see" BusyView before it
-            # goes away.
-            sleep(.3)
-            self.busy.hide()
-            weekdays = ['lundi', 'mardi', 'mercredi',
-                        'jeudi', 'vendredi', 'samedi', 'dimanche']
-            subject = (f"Attestion de déplacement - {weekdays[start.weekday()]} "
-                       f"{start.strftime('%Hh%M')}")
-            mail_compose(subject=subject,
-                         recipients=[person.email],
-                         filename=pdf_file,
-                         mime_type='application/pdf')
-
-        self.busy.show()
-        Thread(target=continuation).start()
-
-    def close_and_exit(self, sender: ui.Button) -> None:
-        """ [ui.Button] Close the view and exit app. """
-        self.close()
-
-    def generated_time(self) -> datetime:
-        """ Return the time the certificate was generated, as a datetime. """
-        return (self.now
-                - timedelta(minutes=int(self.generated_textfield.text or '0')))
-
-    def start_time(self) -> datetime:
-        """ Return the time the certificate starts, as a datetime. """
-        return (self.generated_time()
-                + timedelta(minutes=int(self.start_textfield.text or '0')))
 
 
 if __name__ == '__main__':
     with open(PERSONS_FILE) as file:
         persons = [Person(*person_entry) for person_entry in json.load(file)]
-    PersonsView(persons).present()
+    if sys.platform == 'ios':
+        PersonsView(persons).present()
+    else:
+        pdf_file = generate_certificate_pdf(
+            person=persons[0],
+            reason=0,
+            start=datetime.now(),
+            generated=datetime.now())
