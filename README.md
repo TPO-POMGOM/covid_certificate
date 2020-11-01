@@ -24,12 +24,12 @@ alternative to the official service:
 - When run, the applet displays a list of persons for whom a certificate can be
   generated.
 
-![UI](Screenshot_1_UI.png)
+  ![UI](Screenshot_1_UI.png)
 
 - When a person is selected, an email is prepared, with the PDF file for the
   certificate attached, and you only have to press the send button.
 
-![Mail](TPO-POMGOM.github.com/covid_certificate/Screenshot 2 - Mail.png)
+  ![Mail](Screenshot_2_Mail.png)
 
 
 Getting Started
