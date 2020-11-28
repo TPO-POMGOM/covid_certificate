@@ -57,7 +57,9 @@ not to work around the rules of confinement - Use in a responsible way.
 
 - 21-Avr-2020 - Second release, with PDF file generation and full UI.
 
-- 1-Nov-2020 - Third release, with PDF file updated to the new official format. """
+- 1-Nov-2020 - Third release, with PDF file updated to the new official format.
+
+- 28-Nov-2020 - Fourth release, with PDF file updated to the new official format. """
 
 
 from dataclasses import dataclass, field as dataclass_field
@@ -77,9 +79,10 @@ from pdfrw.pagemerge import RectXObj
 
 
 PERSONS_FILE = "persons.json"
-TEMPLATE_PDF = 'attestation-deplacement-fr 2020 10 30.pdf'
+TEMPLATE_PDF = 'attestation-deplacement-fr 2020 11 28.pdf'
 CERTIFICATE_PDF = 'Attestation.pdf'
-REASONS = ["travail", "achats", "sante", "famille", "sport_animaux"]
+REASONS = ["travail", "achats_culturel_cultuel", "sante", "famille", "sport_animaux"]
+REASONS_TITLES = ["travail", "achats", "sante", "famille", "sport"]
 
 
 if sys.platform == 'ios':
@@ -113,7 +116,7 @@ if sys.platform == 'ios':
             self.reason_selector = ui.SegmentedControl(
                 y=y,
                 width=300,
-                segments=REASONS,
+                segments=REASONS_TITLES,
                 selected_index=4)
             y += CONTROLS_HEIGHT + CONTROLS_VERTICAL_MARGIN
 
@@ -320,11 +323,11 @@ class QRCodeField(Field):
         QRCODE_SIZE_PX = 152  # Good compromise between image size and quality
         person = self.person
         img = qrcode.make(
-            f"Cree le: {self.generated.strftime('%d/%m/%Y a %Hh%M')};\n "
-            f"Nom: {person.last_name};\n Prenom: {person.first_name};\n "
-            f"Naissance: {person.birthdate} a {person.birthplace};\n "
-            f"Adresse: {person.address} {person.postal_code} {person.city};\n "
-            f"Sortie: {self.start.strftime('%d/%m/%Y a %H:%M')};\n "
+            f"Cree le: {self.generated.strftime('%d/%m/%Y a %Hh%M')};\n"
+            f"Nom: {person.last_name};\nPrenom: {person.first_name};\n"
+            f"Naissance: {person.birthdate} a {person.birthplace};\n"
+            f"Adresse: {person.address} {person.postal_code} {person.city};\n"
+            f"Sortie: {self.start.strftime('%d/%m/%Y a %H:%M')};\n"
             f"Motifs: {REASONS[self.reason]}"
         ).resize(size=(QRCODE_SIZE_PX, QRCODE_SIZE_PX))
         img.save(self.filename)
@@ -374,42 +377,42 @@ def generate_certificate_pdf(person: Person,
     fields = [
         TextField(text=f"{person.first_name} {person.last_name}",
                   font=font,
-                  x=4.2, y=24.57, scale=.47),
+                  x=3.27, y=24.8, scale=.47),
         TextField(text=person.birthdate,
                   font=font,
-                  x=4.2, y=23.75, scale=.47),
+                  x=3.27, y=24.15, scale=.47),
         TextField(text=person.birthplace,
                   font=font,
-                  x=10.5, y=23.75, scale=.47),
+                  x=7.55, y=24.15, scale=.47),
         TextField(text=f"{person.address} {person.postal_code} {person.city} ",
                   font=font,
-                  x=4.75, y=23.03, scale=.47),
+                  x=3.68, y=23.476, scale=.47),
         TextField(text="X" if reason == 0 else " ",
                   font=font,
-                  x=2.8, y=20.36, scale=.5),
+                  x=1.625, y=19.52, scale=.37),
         TextField(text="X" if reason == 1 else " ",
                   font=font,
-                  x=2.8, y=18.77, scale=.5),
+                  x=1.625, y=17.02, scale=.37),
         TextField(text="X" if reason == 2 else " ",
                   font=font,
-                  x=2.8, y=16.85, scale=.5),
+                  x=1.625, y=15.32, scale=.37),
         TextField(text="X" if reason == 3 else " ",
                   font=font,
-                  x=2.8, y=15.38, scale=.5),
-        TextField(text="X" if reason == 4 else " ",
+                  x=1.625, y=14.47, scale=.37),
+        TextField(text="X" if reason == 4 else "  ",
                   font=font,
-                  x=2.8, y=12.62, scale=.5),
+                  x=1.66, y=12.32, scale=.37),
         TextField(text=person.city,
                   font=font,
-                  x=3.85, y=6.17, scale=.47),
+                  x=2.8, y=2.7, scale=.47),
         TextField(text=start.strftime('%d/%m/%Y'),
                   font=font,
-                  x=3.3, y=5.37, scale=.47),
+                  x=2.22, y=2.05, scale=.47),
         TextField(text=start.strftime('%H:%M'),
                   font=font,
-                  x=9.4, y=5.37, scale=.47),
+                  x=8.02, y=2.05, scale=.47),
         QRCodeField(person=person, reason=reason, start=start, generated=generated,
-                    x=15.35, y=3.5, scale=.65)
+                    x=15.35, y=.9, scale=.65)
     ]
 
     def set_position(obj: RectXObj, x: float, y: float, scale: float) -> None:
